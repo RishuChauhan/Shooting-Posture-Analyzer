@@ -34,6 +34,7 @@ from utils.helpers import (
     cv_to_qt_pixmap, show_error_message, show_info_message,
     get_score_color, format_duration
 )
+from core.audio_detector import AudioDetector
 
 # Initialize logger
 logger = logging.getLogger(__name__)
@@ -78,13 +79,20 @@ class LiveAnalysisWidget(QWidget):
         self.current_score = 0
         self.pose_detected = False
         self.analysis_results = []
-        
+
+        self.audio_detector = AudioDetector()
+        self.audio_detector.set_detection_callback(self._auto_capture_frame)
+
+        self.current_joint_angles = {}
+
+        self.is_audio_enabled = False
+
         # Initialize UI
         self._init_ui()
         
         # Initialize camera from settings
         self._init_camera()
-        
+
         logger.info("LiveAnalysisWidget initialized")
     
     def _init_ui(self):
@@ -159,6 +167,36 @@ class LiveAnalysisWidget(QWidget):
         
         left_layout.addWidget(recording_controls)
         
+        #Audio controls
+        audio_controls = QWidget()
+        audio_layout = QHBoxLayout(audio_controls)
+
+        self.capture_btn = QPushButton("Capture")
+        self.capture_btn.setMinimumHeight(40)
+        self.capture_btn.clicked.connect(self._manual_capture)
+        self.capture_btn.setToolTip("Capture current posture immediately")
+        audio_layout.addWidget(self.capture_btn)
+
+        self.audio_on_btn = QPushButton("Audio On")
+        self.audio_on_btn.setMinimumHeight(40)
+        self.audio_on_btn.clicked.connect(self._enable_audio)
+        self.audio_on_btn.setToolTip("Enable automatic capture on shot detection")
+        audio_layout.addWidget(self.audio_on_btn)
+
+        self.audio_off_btn = QPushButton("Audio Off")
+        self.audio_off_btn.setMinimumHeight(40)
+        self.audio_off_btn.setEnabled(False)
+        self.audio_off_btn.clicked.connect(self._disable_audio)
+        self.audio_off_btn.setToolTip("Disable automatic capture")
+        audio_layout.addWidget(self.audio_off_btn)
+
+        # Add audio status indicator
+        self.audio_status = QLabel("Audio Detection: Off")
+        self.audio_status.setStyleSheet("color: red; font-weight: bold;")
+        audio_layout.addWidget(self.audio_status)
+
+        left_layout.addWidget(audio_controls)
+
         # Add left panel to splitter
         self.splitter.addWidget(self.left_panel)
         
@@ -329,6 +367,13 @@ class LiveAnalysisWidget(QWidget):
             pose_detected: Boolean indicating if pose was detected
         """
         self.pose_detected = pose_detected
+        
+        # Store the current joint angles for later use (important for capture)
+        self.current_joint_angles = joint_angles.copy() if joint_angles else {}
+        
+        # Log for debugging
+        if joint_angles:
+            logger.debug(f"Received joint angles: {joint_angles}")
         
         # Skip if no pose detected
         if not pose_detected:
@@ -539,55 +584,89 @@ class LiveAnalysisWidget(QWidget):
     def _process_recorded_session(self):
         """Process and analyze the recorded session data."""
         if not self.recorded_frames:
+            logger.warning("No recorded frames to process")
             return
-        
-        # Extract joint angles from all frames
-        joint_angles_sequence = []
-        all_posture_analyses = []
-        
-        # Process each frame
-        for i, frame_data in enumerate(self.recorded_frames):
-            # Get joint angles
-            joint_angles = frame_data['joint_angles']
-            
-            if joint_angles:
-                joint_angles_sequence.append(joint_angles)
+
+        try:
+            # Extract frames for saving as video
+            raw_frames = []
+            processed_frames = []
+
+            # Extract joint angles from all frames
+            joint_angles_sequence = []
+            all_posture_analyses = []
+
+            # Process each frame
+            for i, frame_data in enumerate(self.recorded_frames):
+                # Check the structure of frame_data
+                if 'frame' not in frame_data or 'processed_frame' not in frame_data:
+                    logger.warning(f"Frame {i} has incomplete data structure")
+                    continue
                 
-                # Get or create analysis for this frame
-                if i < len(self.analysis_results):
-                    analysis = self.analysis_results[i]
+                # Add frames for video saving
+                raw_frames.append(frame_data['frame'].copy())
+                processed_frames.append(frame_data['processed_frame'].copy())
+
+                # Get joint angles
+                if 'joint_angles' in frame_data:
+                    joint_angles = frame_data['joint_angles']
                 else:
-                    analysis = self.posture_analyzer.analyze_posture(joint_angles)
-                
-                all_posture_analyses.append(analysis)
-                
-                # Save frame data to database
-                self.data_manager.add_session_data(
-                    self.current_session_id,
-                    i,
-                    joint_angles,
-                    analysis['score'],
-                    analysis['feedback']
+                    logger.warning(f"Frame {i} has no joint_angles data")
+                    joint_angles = {}
+
+                if joint_angles:
+                    joint_angles_sequence.append(joint_angles)
+
+                    # Get or create analysis for this frame
+                    if i < len(self.analysis_results):
+                        analysis = self.analysis_results[i]
+                    else:
+                        analysis = self.posture_analyzer.analyze_posture(joint_angles)
+
+                    all_posture_analyses.append(analysis)
+
+                    # Save frame data to database with path to image
+                    self.data_manager.add_session_data(
+                        self.current_session_id,
+                        i,
+                        joint_angles,
+                        analysis['score'],
+                        analysis['feedback'],
+                        frame=frame_data['processed_frame']  # Will be saved to disk
+                    )
+
+            # Save the processed frames as a video file
+            if processed_frames:
+                video_path = self.data_manager.save_session_video(
+                    self.current_session_id, processed_frames
                 )
-        
-        # Analyze stability
-        stability_analysis = self.posture_analyzer.analyze_stability(joint_angles_sequence)
-        
-        # Generate session summary
-        summary = self.posture_analyzer.generate_session_summary(
-            all_posture_analyses, stability_analysis
-        )
-        
-        # Update session in database
-        self.data_manager.update_session(
-            self.current_session_id,
-            overall_score=summary['overall_score'],
-            posture_quality=summary['posture_quality'],
-            stability=summary['stability'],
-            summary=summary
-        )
-        
-        logger.info(f"Processed {len(self.recorded_frames)} frames for session ID: {self.current_session_id}")
+                if video_path:
+                    logger.info(f"Saved session video to {video_path}")
+                else:
+                    logger.warning("Failed to save session video")
+
+            # Analyze stability
+            stability_analysis = self.posture_analyzer.analyze_stability(joint_angles_sequence)
+
+            # Generate session summary
+            summary = self.posture_analyzer.generate_session_summary(
+                all_posture_analyses, stability_analysis
+            )
+
+            # Update session in database
+            self.data_manager.update_session(
+                self.current_session_id,
+                overall_score=summary['overall_score'],
+                posture_quality=summary['posture_quality'],
+                stability=summary['stability'],
+                summary=summary
+            )
+
+            logger.info(f"Processed {len(self.recorded_frames)} frames for session ID: {self.current_session_id}")
+
+        except Exception as e:
+            logger.error(f"Error processing recorded session: {str(e)}")
+            self.feedback_text.append(f"Error processing session: {str(e)}")
     
     def _refresh_cameras(self):
         """Refresh the list of available cameras."""
@@ -664,3 +743,261 @@ class LiveAnalysisWidget(QWidget):
         # Stop timer
         if hasattr(self, 'ui_timer'):
             self.ui_timer.stop()
+    def _enable_audio(self):
+        """Enable audio detection."""
+        if not self.audio_detector:
+            return
+
+        try:
+            # Start the audio detector if not already running
+            if not self.audio_detector.is_running:
+                self.audio_detector.start()
+
+            # Start listening
+            self.audio_detector.start_listening()
+            self.is_audio_enabled = True
+
+            # Update UI
+            self.audio_status.setText("Audio Detection: On")
+            self.audio_status.setStyleSheet("color: green; font-weight: bold;")
+            self.audio_on_btn.setEnabled(False)
+            self.audio_off_btn.setEnabled(True)
+
+            # Show feedback message
+            self.feedback_text.append("Audio detection enabled - ready to capture on shot detection")
+
+            logger.info("Audio detection enabled")
+
+        except Exception as e:
+            logger.error(f"Error enabling audio detection: {str(e)}")
+            show_error_message(self, "Audio Error", 
+                              f"Failed to enable audio detection: {str(e)}")
+            self._disable_audio()
+
+    def _disable_audio(self):
+        """Disable audio detection."""
+        if not self.audio_detector:
+            return
+
+        # Stop listening
+        self.audio_detector.stop_listening()
+        self.is_audio_enabled = False
+
+        # Update UI
+        self.audio_status.setText("Audio Detection: Off")
+        self.audio_status.setStyleSheet("color: red; font-weight: bold;")
+        self.audio_on_btn.setEnabled(True)
+        self.audio_off_btn.setEnabled(False)
+
+        # Show feedback message
+        self.feedback_text.append("Audio detection disabled")
+
+        logger.info("Audio detection disabled")
+
+    def _manual_capture(self):
+        """Manually capture the current frame."""
+        if not self.current_user_id:
+            show_error_message(self, "No User Selected", 
+                              "Please select a shooter profile before capturing.")
+            return
+
+        if not self.video_thread:
+            show_error_message(self, "No Camera", 
+                              "Camera is not initialized. Cannot capture.")
+            return
+
+        # Capture the current frame
+        self._capture_frame(auto_detected=False)
+
+    def _auto_capture_frame(self):
+        """Automatically capture frame when shot is detected."""
+        # This method is called by the audio detector callback
+        # It runs in a separate thread, so we need to be careful
+
+        # Check if we can capture
+        if not self.current_user_id or not self.video_thread or not self.is_recording:
+            return
+
+        # Capture the frame
+        self._capture_frame(auto_detected=True)
+
+    def _capture_frame(self, auto_detected=False):
+        """
+        Capture the current frame and save it.
+
+        Args:
+            auto_detected: Whether this was triggered by audio detection
+        """
+        try:
+            # Check if we have a pose detected
+            if not self.pose_detected:
+                logger.warning("Cannot capture frame: No pose detected")
+                self.feedback_text.append("Cannot capture: No pose detected")
+                return
+
+            # Create or get a session for this capture
+            if not self.current_session_id:
+                # Create a new session if we don't have one
+                timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+                session_name = f"Shot Capture Session {timestamp}"
+                self.current_session_id = self.data_manager.create_session(
+                    self.current_user_id, session_name
+                )
+                self.session_info.setText(f"Session: {session_name}")
+
+            # Get current joint angles from the most recent processed frame
+            joint_angles = {}
+            if hasattr(self.video_thread, 'last_joint_angles'):
+                joint_angles = self.video_thread.last_joint_angles.copy() if self.video_thread.last_joint_angles else {}
+            else:
+                # If we don't have access to the video thread's joint angles, try to get them from the instance
+                if hasattr(self, 'current_joint_angles') and self.current_joint_angles:
+                    joint_angles = self.current_joint_angles.copy()
+
+            # Log the joint angles being saved
+            logger.info(f"Capturing frame with joint angles: {joint_angles}")
+
+            # Create a shot entry with the current data
+            frame_number = self.frame_count
+            posture_score = self.current_score
+            feedback = ["Captured during shot detection" if auto_detected else "Manually captured"]
+
+            # Get the current frame from the video thread if available
+            current_frame = None
+            if hasattr(self.video_thread, 'last_frame') and self.video_thread.last_frame is not None:
+                current_frame = self.video_thread.last_frame.copy()
+
+            # Add session data
+            data_id = self.data_manager.add_session_data(
+                self.current_session_id,
+                frame_number,
+                joint_angles,
+                posture_score,
+                feedback,
+                frame=current_frame
+            )
+
+            # Show capture feedback
+            source = "Audio Detection" if auto_detected else "Manual Capture"
+            self.feedback_text.append(f"Captured frame {frame_number} - {source}")
+            self.feedback_text.append(f"Joint angles saved: {', '.join(joint_angles.keys())}")
+
+            # Flash effect for visual feedback
+            self._flash_effect()
+
+            logger.info(f"Captured frame {frame_number}: Score {posture_score:.1f} (Auto: {auto_detected})")
+
+        except Exception as e:
+            logger.error(f"Error capturing frame: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            self.feedback_text.append(f"Error capturing frame: {str(e)}")
+
+    def _flash_effect(self):
+        """Create a flash effect for visual feedback when capturing."""
+        # Create flash overlay
+        flash = QFrame(self.video_frame)
+        flash.setStyleSheet("background-color: rgba(255, 255, 255, 150);")
+        flash.setGeometry(self.video_frame.rect())
+        flash.show()
+
+        # Timer to remove flash after a short delay
+        QTimer.singleShot(100, flash.deleteLater)
+
+    def _validate_session_data(self, session_id):
+        """
+        Validate session data by checking file paths.
+
+        Args:
+            session_id: Session ID to validate
+
+        Returns:
+            Dictionary with validation results
+        """
+        try:
+            # Get session data
+            session_data = self.data_manager.get_session_data(session_id)
+
+            if not session_data:
+                logger.warning(f"No data found for session {session_id}")
+                return {"status": "error", "message": "No session data found"}
+
+            # Check file paths
+            files_checked = 0
+            files_missing = 0
+
+            for item in session_data:
+                files_checked += 1
+
+                if 'frame_path' in item and item['frame_path']:
+                    # Construct absolute path
+                    data_dir = os.path.dirname(self.data_manager.db_path)
+                    abs_path = os.path.join(data_dir, item['frame_path'])
+
+                    if not os.path.exists(abs_path):
+                        logger.warning(f"Image file not found: {abs_path}")
+                        files_missing += 1
+
+            # Get session info
+            session = self.data_manager.get_session(session_id)
+
+            # Check video path if it exists
+            video_missing = False
+            if 'video_path' in session and session['video_path']:
+                data_dir = os.path.dirname(self.data_manager.db_path)
+                video_path = os.path.join(data_dir, session['video_path'])
+
+                if not os.path.exists(video_path):
+                    logger.warning(f"Video file not found: {video_path}")
+                    video_missing = True
+
+            return {
+                "status": "success",
+                "files_checked": files_checked,
+                "files_missing": files_missing,
+                "video_missing": video_missing
+            }
+
+        except Exception as e:
+            logger.error(f"Error validating session data: {str(e)}")
+            return {"status": "error", "message": str(e)}
+
+    def _save_session(self):
+        """Save the recorded session with analysis."""
+        if not self.current_session_id or not hasattr(self, 'recorded_frames'):
+            show_error_message(self, "No Session", 
+                              "No recorded session to save.")
+            return
+
+        try:
+            # Process recorded session - saves frames to disk and creates video
+            self._process_recorded_session()
+
+            # Validate the saved data
+            validation = self._validate_session_data(self.current_session_id)
+
+            if validation["status"] == "success":
+                message = f"Session saved successfully!\n{validation['files_checked']} frames processed."
+
+                if validation["files_missing"] > 0:
+                    message += f"\nWarning: {validation['files_missing']} image files could not be found."
+
+                if validation.get("video_missing", False):
+                    message += "\nWarning: Session video file could not be found."
+
+                show_info_message(self, "Session Saved", message)
+            else:
+                show_error_message(self, "Save Error", 
+                                 f"Session saved with issues: {validation['message']}")
+
+            # Reset state
+            self.save_session_btn.setEnabled(False)
+            self.session_info.setText("No active session")
+            self.duration_label.setText("Duration: 00:00")
+            self.frames_label.setText("Frames: 0")
+            self.current_session_id = None
+
+        except Exception as e:
+            logger.error(f"Error saving session: {str(e)}")
+            show_error_message(self, "Save Error", 
+                              f"Failed to save session: {str(e)}")

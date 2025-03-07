@@ -15,6 +15,7 @@ import logging
 import time
 import cv2
 import numpy as np
+import threading
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
     QSlider, QComboBox, QGroupBox, QCheckBox, QSplitter,
@@ -84,6 +85,12 @@ class ReplayWidget(QWidget):
         self.playback_timer = QTimer(self)
         self.playback_timer.timeout.connect(self._play_next_frame)
         self.playback_timer.setInterval(100)  # 10 fps playback
+
+        self.video_cap = None
+        self.video_thread = None
+        self.stop_video_thread = False
+        self.current_video_path = None
+        self.frame_rate = 15
         
         logger.info("ReplayWidget initialized")
     
@@ -392,41 +399,59 @@ class ReplayWidget(QWidget):
     def load_session(self, session_id):
         """
         Load a session for replay.
-        
+
         Args:
             session_id: Session ID to load
         """
         try:
             # Clear current session
             self._clear_session()
-            
+
             # Store session ID
             self.current_session_id = session_id
-            
+
             # Get session data
             self.current_session = self.data_manager.get_session(session_id)
-            
+
             if not self.current_session:
                 show_error_message(self, "Session Error", 
                                   "Failed to load session. Session not found.")
                 return
-            
+
+            # Check if there's a video path
+            if 'video_path' in self.current_session and self.current_session['video_path']:
+                # Store the video path
+                data_dir = os.path.dirname(self.data_manager.db_path)
+                self.current_video_path = os.path.join(data_dir, self.current_session['video_path'])
+
+                # Validate the video file
+                if not os.path.exists(self.current_video_path):
+                    logger.warning(f"Video file not found: {self.current_video_path}")
+                    self.current_video_path = None
+
+                    # Show warning to user
+                    show_error_message(self, "Video Not Found", 
+                                     f"The video file for this session could not be found. "
+                                     f"Will attempt to load individual frames instead.")
+            else:
+                self.current_video_path = None
+
             # Get detailed session data
             self.session_data = self.data_manager.get_session_data(session_id)
-            
+
             if not self.session_data:
                 show_error_message(self, "Session Error", 
                                   "This session has no recorded data.")
                 return
-            
+
             # Update UI with session info
             self._update_session_info()
-            
+
             # Prepare video player
             self._prepare_playback()
-            
+
             logger.info(f"Loaded session ID: {session_id} with {len(self.session_data)} frames")
-            
+
         except Exception as e:
             logger.error(f"Error loading session: {str(e)}")
             show_error_message(self, "Session Error", 
@@ -504,56 +529,142 @@ class ReplayWidget(QWidget):
         """Prepare the video player for playback."""
         if not self.session_data:
             return
-        
+
         # Set up slider
         self.frame_slider.setMinimum(0)
         self.frame_slider.setMaximum(len(self.session_data) - 1)
         self.frame_slider.setValue(0)
         self.frame_slider.setEnabled(True)
-        
+
         # Update frame counter
         self.frame_counter.setText(f"0/{len(self.session_data) - 1}")
-        
+
         # Enable controls
         self.play_pause_btn.setEnabled(True)
         self.restart_btn.setEnabled(True)
-        
+
+        # Close existing video capture if any
+        if self.video_cap is not None:
+            self.video_cap.release()
+            self.video_cap = None
+
+        # Initialize video capture if video path exists
+        if self.current_video_path and os.path.exists(self.current_video_path):
+            try:
+                self.video_cap = cv2.VideoCapture(self.current_video_path)
+
+                if self.video_cap.isOpened():
+                    # Get video properties
+                    fps = self.video_cap.get(cv2.CAP_PROP_FPS)
+                    if fps > 0:
+                        self.frame_rate = fps
+
+                    frame_count = int(self.video_cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                    logger.info(f"Opened video with {frame_count} frames at {self.frame_rate} FPS")
+
+                    # Reset to first frame
+                    self.video_cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                else:
+                    logger.warning(f"Failed to open video file: {self.current_video_path}")
+                    self.video_cap = None
+            except Exception as e:
+                logger.error(f"Error initializing video capture: {str(e)}")
+                self.video_cap = None
+
         # Display first frame
         self._show_frame(0)
+
     
+
     def _show_frame(self, frame_index):
         """
         Display a specific frame from the session.
-        
+
         Args:
             frame_index: Index of the frame to display
         """
         if not self.session_data or frame_index < 0 or frame_index >= len(self.session_data):
             return
-        
+
         try:
             # Get frame data
             frame_data = self.session_data[frame_index]
-            
+
             # Extract data
             joint_angles = frame_data['joint_angles']
             posture_score = frame_data['posture_score']
             feedback = frame_data['feedback']
-            
+
             # Update UI
             self._update_analysis_display(posture_score, feedback, joint_angles)
-            
+
             # Update frame counter
             self.frame_counter.setText(f"{frame_index}/{len(self.session_data) - 1}")
-            
+
             # Update slider (without triggering valueChanged)
             self.frame_slider.blockSignals(True)
             self.frame_slider.setValue(frame_index)
             self.frame_slider.blockSignals(False)
-            
+
             # Store current index
             self.current_frame_index = frame_index
-            
+
+            # Get the frame image - try multiple sources in order of preference:
+            # 1. Video file if available
+            # 2. Preloaded frame_image if available
+            # 3. Load from frame_path if available
+            # 4. Generate a placeholder
+
+            display_frame = None
+
+            # 1. Try to get frame from video file
+            if self.video_cap is not None and self.video_cap.isOpened():
+                # Seek to the correct frame
+                self.video_cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
+                ret, frame = self.video_cap.read()
+
+                if ret:
+                    display_frame = frame
+
+            # 2. Try to use preloaded frame_image
+            if display_frame is None and 'frame_image' in frame_data and frame_data['frame_image'] is not None:
+                display_frame = frame_data['frame_image']
+
+            # 3. Try to load from frame_path
+            if display_frame is None and 'frame_path' in frame_data and frame_data['frame_path']:
+                try:
+                    # Construct absolute path
+                    data_dir = os.path.dirname(self.data_manager.db_path)
+                    abs_path = os.path.join(data_dir, frame_data['frame_path'])
+
+                    if os.path.exists(abs_path):
+                        display_frame = cv2.imread(abs_path)
+
+                        if display_frame is None:
+                            logger.warning(f"Failed to load image at {abs_path}")
+                    else:
+                        logger.warning(f"Image file not found at {abs_path}")
+                except Exception as e:
+                    logger.error(f"Error loading frame from path: {str(e)}")
+
+            # 4. If all else fails, generate a placeholder
+            if display_frame is None:
+                placeholder_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+                cv2.putText(placeholder_frame, "Frame data unavailable", (50, 240), 
+                          cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+                cv2.putText(placeholder_frame, f"Score: {posture_score:.1f}", 
+                          (50, 280), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+                display_frame = placeholder_frame
+
+            # Update display
+            pixmap = cv_to_qt_pixmap(display_frame)
+            scaled_pixmap = pixmap.scaled(
+                self.video_frame.size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation
+            )
+            self.video_frame.setPixmap(scaled_pixmap)
+
         except Exception as e:
             logger.error(f"Error displaying frame {frame_index}: {str(e)}")
     
@@ -633,17 +744,35 @@ class ReplayWidget(QWidget):
         """Start playback."""
         if not self.session_data:
             return
-        
+
         self.is_playing = True
         self.play_pause_btn.setText("Pause")
-        self.last_frame_time = time.time()
-        self.playback_timer.start()
+
+        # If we have a video file, use video playback thread
+        if self.video_cap is not None and self.video_cap.isOpened():
+            # Stop existing thread if running
+            self._stop_video_thread()
+
+            # Start new thread
+            self.stop_video_thread = False
+            self.video_thread = threading.Thread(target=self._video_playback_loop)
+            self.video_thread.daemon = True
+            self.video_thread.start()
+        else:
+            # Use timer for frame-by-frame playback from images
+            self.last_frame_time = time.time()
+            self.playback_timer.start()
     
     def _stop_playback(self):
         """Stop playback."""
         self.is_playing = False
         self.play_pause_btn.setText("Play")
+
+        # Stop playback timer
         self.playback_timer.stop()
+
+        # Stop video thread if running
+        self._stop_video_thread()
     
     def _restart_playback(self):
         """Restart playback from the beginning."""
@@ -729,8 +858,69 @@ class ReplayWidget(QWidget):
         self.show_ideal_overlay = checked
         self._show_frame(self.current_frame_index)
     
+    
+    def _stop_video_thread(self):
+        """Stop the video playback thread if running."""
+        if self.video_thread and self.video_thread.is_alive():
+            self.stop_video_thread = True
+            self.video_thread.join(timeout=1.0)
+            self.video_thread = None
+    
+    def _video_playback_loop(self):
+        """Video playback loop running in a separate thread."""
+        try:
+            # Ensure video is at the current frame
+            self.video_cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame_index)
+
+            # Calculate frame interval
+            frame_interval = 1.0 / self.frame_rate
+
+            while not self.stop_video_thread and self.is_playing:
+                # Get the next frame
+                ret, frame = self.video_cap.read()
+
+                if not ret:
+                    # End of video, stop playback
+                    break
+                
+                # Get current frame index
+                current_pos = int(self.video_cap.get(cv2.CAP_PROP_POS_FRAMES)) - 1
+
+                if current_pos >= len(self.session_data):
+                    # We've reached the end of our data
+                    break
+                
+                # Update the UI with the new frame
+                # We need to use signals/slots to update UI from a background thread
+                # For simplicity, we'll use the setValue signal from the slider
+                # This will trigger _slider_moved which updates the display
+                self.frame_slider.blockSignals(False)
+                self.frame_slider.setValue(current_pos)
+                self.frame_slider.blockSignals(True)
+
+                # Sleep to maintain frame rate
+                time.sleep(frame_interval)
+
+            # Stop playback when the thread exits
+            if self.is_playing:
+                self.is_playing = False
+                # Update UI in main thread
+                QTimer.singleShot(0, lambda: self.play_pause_btn.setText("Play"))
+
+        except Exception as e:
+            logger.error(f"Error in video playback thread: {str(e)}")
+            self.is_playing = False
+
     def cleanup(self):
         """Clean up resources before widget is destroyed."""
         # Stop playback timer
         if hasattr(self, 'playback_timer'):
             self.playback_timer.stop()
+
+        # Stop video thread
+        self._stop_video_thread()
+
+        # Release video capture
+        if hasattr(self, 'video_cap') and self.video_cap is not None:
+            self.video_cap.release()
+            self.video_cap = None

@@ -330,6 +330,9 @@ class VideoThread(QThread):
         self.pose_detector = PoseDetector()
         self.recording = False
         self.recorded_frames = []
+
+        self.last_joint_angles = {}
+        self.last_frame = None
         
         logger.info(f"VideoThread initialized with camera ID: {camera_id}")
     
@@ -358,19 +361,31 @@ class VideoThread(QThread):
                     self.error_occurred.emit("Failed to capture frame")
                     break
                 
+                # Store original frame before processing
+                original_frame = frame.copy()
+                self.last_frame = original_frame  # Save the most recent frame
+                
                 # Process frame with pose detector
                 processed_frame, joint_angles, pose_detected = self.pose_detector.process_frame(frame)
+                
+                # Store the joint angles regardless of pose detection status
+                if joint_angles:
+                    self.last_joint_angles = joint_angles.copy()
+                    logger.debug(f"Updated last_joint_angles: {self.last_joint_angles}")
                 
                 # Emit signals with results
                 self.frame_ready.emit(processed_frame)
                 self.pose_data_ready.emit(joint_angles, pose_detected)
                 
                 # Record frame if recording is active
-                if self.recording and pose_detected:
+                if self.recording:
+                    # Always store the frame data (even if no pose detected)
+                    # This ensures we have continuous video for replay
                     self.recorded_frames.append({
-                        'frame': frame.copy(),
-                        'processed_frame': processed_frame.copy(),
-                        'joint_angles': joint_angles.copy()
+                        'frame': original_frame,  # Original frame
+                        'processed_frame': processed_frame,  # Processed frame with overlays
+                        'joint_angles': joint_angles.copy() if joint_angles else {},  # Joint angles (safely copied)
+                        'pose_detected': pose_detected  # Store the detection state
                     })
                 
                 # Sleep briefly to reduce CPU usage
@@ -381,6 +396,8 @@ class VideoThread(QThread):
             
         except Exception as e:
             logger.error(f"Error in video thread: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
             self.error_occurred.emit(f"Video processing error: {str(e)}")
         
         finally:

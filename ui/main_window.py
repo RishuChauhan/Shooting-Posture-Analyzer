@@ -32,6 +32,7 @@ from ui.profiles import ProfilesWidget
 from ui.performance import PerformanceWidget
 from ui.replay import ReplayWidget
 from ui.settings import SettingsWidget
+from ui.plot_3d import Plot3DWidget
 
 # Initialize logger
 logger = logging.getLogger(__name__)
@@ -152,11 +153,17 @@ class MainWindow(QMainWindow):
         sidebar_layout.addWidget(self.nav_buttons['performance'])
         
         # Replay button
-        self.nav_buttons['replay'] = QPushButton("Replay & Analysis")
+        self.nav_buttons['replay'] = QPushButton("Replay Analysis")
         self.nav_buttons['replay'].setObjectName("nav-button")
         self.nav_buttons['replay'].setMinimumHeight(50)
         sidebar_layout.addWidget(self.nav_buttons['replay'])
         
+        # 3D Plot Analysis button
+        self.nav_buttons['plot3d'] = QPushButton("3D Plot Analysis")
+        self.nav_buttons['plot3d'].setObjectName("nav-button")
+        self.nav_buttons['plot3d'].setMinimumHeight(50)
+        sidebar_layout.addWidget(self.nav_buttons['plot3d'])
+
         # Settings button
         self.nav_buttons['settings'] = QPushButton("Settings")
         self.nav_buttons['settings'].setObjectName("nav-button")
@@ -223,6 +230,10 @@ class MainWindow(QMainWindow):
         self.widgets['replay'] = ReplayWidget(self.data_manager)
         self.stacked_widget.addWidget(self.widgets['replay'])
         
+        # 3D Plot
+        self.widgets['plot3d'] = Plot3DWidget(self.data_manager)
+        self.stacked_widget.addWidget(self.widgets['plot3d'])
+
         # Settings
         self.widgets['settings'] = SettingsWidget(self.data_manager)
         self.stacked_widget.addWidget(self.widgets['settings'])
@@ -276,51 +287,65 @@ class MainWindow(QMainWindow):
         self._update_action_states()
     
     def _navigate(self, page_name):
-    
-    # Create a status bar if it doesn't exist yet
+        """Navigate to a specific page.
+
+        Args:
+            page_name: Name of the page to navigate to
+        """
+        # Create a status bar if it doesn't exist yet
         if not hasattr(self, 'status_bar'):
             self.status_bar = QStatusBar()
             self.setStatusBar(self.status_bar)
-    
+
         if page_name not in self.widgets:
             logger.error(f"Page '{page_name}' not found")
             return
-    
-    # Get index of the widget in the stacked widget
+
+        # Get index of the widget in the stacked widget
         index = self.stacked_widget.indexOf(self.widgets[page_name])
-    
-    # Set the current index
+
+        # Set the current index
         self.stacked_widget.setCurrentIndex(index)
-    
-    # Update button styles
+
+        # Update button styles
         for name, button in self.nav_buttons.items():
             if name == page_name:
                 button.setProperty("active", True)
             else:
                 button.setProperty("active", False)
-        
-        # Force style update
+
+            # Force style update
             button.style().unpolish(button)
             button.style().polish(button)
-    
-    # Update status bar
+
+        # Update status bar
         self.status_bar.showMessage(f"Viewing {page_name.replace('_', ' ').title()}")
-    
-    # Update action states
+
+        # Update action states
         self._update_action_states()
-    
-    # If navigating to profiles, refresh the data
+
+        # If navigating to profiles, refresh the data
         if page_name == 'profiles':
             self.widgets['profiles'].refresh_data()
-    
-    # If navigating to performance, update with current user
+
+        # If navigating to performance, update with current user and refresh data
         if page_name == 'performance' and self.current_user_id:
             self.widgets['performance'].set_user(self.current_user_id)
-    
-    # If navigating to replay, update with current user
+
+        # If navigating to replay, update with current user and refresh data
         if page_name == 'replay' and self.current_user_id:
             self.widgets['replay'].set_user(self.current_user_id)
-    
+
+        # If navigating to 3D Plot, update with current user and refresh data
+        if page_name == 'plot3d' and self.current_user_id:
+            logger.info("Refreshing 3D Plot Analysis with current user")
+            self.widgets['plot3d'].set_user(self.current_user_id)
+
+            # Force refresh of session data if available
+            if hasattr(self.widgets['plot3d'], 'current_session_id') and self.widgets['plot3d'].current_session_id:
+                logger.info(f"Forcing reload of session {self.widgets['plot3d'].current_session_id}")
+                self.widgets['plot3d']._load_shots()
+
         logger.info(f"Navigated to {page_name}")
     
     def set_current_user(self, user_id, user_name):
@@ -338,6 +363,7 @@ class MainWindow(QMainWindow):
         self.widgets['live'].set_user(user_id)
         self.widgets['performance'].set_user(user_id)
         self.widgets['replay'].set_user(user_id)
+        self.widgets['plot3d'].set_user(user_id)
         
         logger.info(f"Set current user to {user_name} (ID: {user_id})")
         
@@ -429,7 +455,9 @@ class MainWindow(QMainWindow):
             "2. Select a profile and start a new session\n"
             "3. Use the live analysis to monitor and improve your posture\n"
             "4. View performance reports in the 'Performance Dashboard'\n"
-            "5. Review recorded sessions in 'Replay & Analysis'"
+            "5. Review recorded sessions in 'Replay & Analysis'\n"
+            "6. Analyze 3D plots in '3D Plot Analysis'\n"
+            "7. Adjust application settings in 'Settings'"
         )
     
     def _show_about(self):
