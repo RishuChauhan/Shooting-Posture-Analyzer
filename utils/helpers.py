@@ -1,14 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Helpers Module
-
-This module provides utility functions used throughout the application.
-
-Author: Claude
-Date: March 6, 2025
-"""
-
 import os
 import cv2
 import numpy as np

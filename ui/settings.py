@@ -1,15 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Settings Module
-
-This module implements the application settings screen for
-configuring application behavior and appearance.
-
-Author: Claude
-Date: March 6, 2025
-"""
-
 import os
 import logging
 import cv2

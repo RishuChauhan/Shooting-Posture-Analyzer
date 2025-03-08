@@ -1,15 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Video Processing Module
-
-This module handles video capture from webcam and processes frames 
-using MediaPipe for pose detection.
-
-Author: Claude
-Date: March 6, 2025
-"""
-
 import cv2
 import numpy as np
 import mediapipe as mp

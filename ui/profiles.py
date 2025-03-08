@@ -1,15 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Profiles Module
-
-This module implements the user profile management screen
-for creating, editing, and selecting shooter profiles.
-
-Author: Claude
-Date: March 6, 2025
-"""
-
 import logging
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 

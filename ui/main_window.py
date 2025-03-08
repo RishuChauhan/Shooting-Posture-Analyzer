@@ -1,15 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Main Window Module
-
-This module implements the main application window that contains
-all other UI components and handles navigation.
-
-Author: Claude
-Date: March 6, 2025
-"""
-
 import os
 import logging
 from PyQt6.QtWidgets import (

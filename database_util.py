@@ -1,11 +1,6 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+
 """
 Database Utility Script
-
-This script provides utilities for managing the shooting analyzer database,
-including viewing, deleting, and cleaning up data.
-
 Usage:
   python database_util.py [command] [options]
 
@@ -18,8 +13,6 @@ Commands:
   view-tables           View all tables in the database
   vacuum                Optimize database size
 
-Author: Claude
-Date: March 6, 2025
 """
 
 import os

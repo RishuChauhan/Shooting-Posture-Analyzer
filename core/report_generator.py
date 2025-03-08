@@ -1,15 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Simplified Report Generator Module
-
-This module generates concise one-page PDF reports for shooting sessions
-with focus on the 3 key metrics for improvement.
-
-Author: Claude
-Date: March 7, 2025
-"""
-
 import os
 import matplotlib.pyplot as plt
 import matplotlib

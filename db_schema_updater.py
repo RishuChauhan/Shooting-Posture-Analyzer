@@ -1,15 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Database Schema Update Utility
-
-This script updates the session_data table to store file paths
-instead of binary data for better performance and database size.
-
-Author: Claude
-Date: March 7, 2025
-"""
-
 import os
 import sqlite3
 import logging

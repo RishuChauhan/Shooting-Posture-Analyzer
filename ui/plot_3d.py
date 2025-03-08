@@ -1,15 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-3D Plot Analysis Module
-
-This module implements the 3D plot analysis screen for visualizing
-the shooter's body in 3D space with labeled joint angles.
-
-Author: Claude
-Date: March 6, 2025
-"""
-
 import os
 import logging
 import numpy as np

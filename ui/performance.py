@@ -1,15 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Performance Dashboard Module
-
-This module implements the performance dashboard for visualizing
-shooting performance trends and generating reports.
-
-Author: Claude
-Date: March 6, 2025
-"""
-
 import os
 import logging
 import time

@@ -1,15 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Data Management Module
-
-This module handles database operations for storing and retrieving
-user profiles, session data, and application settings.
-
-Author: Claude
-Date: March 7, 2025
-"""
-
 import sqlite3
 import json
 import os

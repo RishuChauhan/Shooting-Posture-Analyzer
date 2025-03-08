@@ -1,15 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Rifle Shooting Posture Analysis System - Main Entry Point
-
-This is the entry point for the application. It initializes the database,
-sets up logging, and launches the main application window.
-
-Author: Claude
-Date: March 6, 2025
-"""
-
 import sys
 import os
 import logging

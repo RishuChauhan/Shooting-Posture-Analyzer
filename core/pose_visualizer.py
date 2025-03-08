@@ -1,14 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Pose Visualizer Module - Improved Version
-
-This module provides enhanced 3D visualization of pose data.
-
-Author: Claude
-Date: March 6, 2025
-"""
-
 import numpy as np
 import matplotlib
 matplotlib.use('Qt5Agg')

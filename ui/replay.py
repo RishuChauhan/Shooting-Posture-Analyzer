@@ -1,15 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Replay & Analysis Module
-
-This module implements the session replay screen for reviewing
-recorded shooting sessions with detailed analysis.
-
-Author: Claude
-Date: March 6, 2025
-"""
-
 import os
 import logging
 import time

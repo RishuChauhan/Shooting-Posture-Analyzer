@@ -1,15 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Posture Analysis Module using Fuzzy Logic
-
-This module analyzes shooting posture using fuzzy logic to provide
-a posture score and actionable feedback.
-
-Author: Claude
-Date: March 6, 2025
-"""
-
 import numpy as np
 import skfuzzy as fuzz
 from skfuzzy import control as ctrl

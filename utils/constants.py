@@ -1,14 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Constants Module
-
-This module defines application-wide constants used throughout the application.
-
-Author: Claude
-Date: March 6, 2025
-"""
-
 import os
 import pathlib
 

@@ -1,15 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Custom Exceptions Module
-
-This module defines custom exceptions used throughout the application
-for proper error handling and user feedback.
-
-Author: Claude
-Date: March 6, 2025
-"""
-
 class AppError(Exception):
     """Base exception class for application errors."""
     

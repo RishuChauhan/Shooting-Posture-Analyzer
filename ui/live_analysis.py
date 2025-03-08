@@ -1,15 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Live Analysis Module
-
-This module implements the live video analysis screen for
-real-time posture feedback and recording.
-
-Author: Claude
-Date: March 6, 2025
-"""
-
 import os
 import logging
 import time
