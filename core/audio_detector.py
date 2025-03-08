@@ -1,15 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Audio Detector Module
-
-This module handles audio input and detection for capturing
-shooting posture when a gunshot is detected.
-
-Author: Claude
-Date: March 6, 2025
-"""
-
 import numpy as np
 import pyaudio
 import time
